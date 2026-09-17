@@ -23,6 +23,25 @@ function wsp_execute_get_posts( $input ) {
     return array( 'posts' => $posts, 'total' => $q->found_posts );
 }
 
+function wsp_execute_get_post( $input ) {
+    $id   = isset( $input['id'] ) ? intval( $input['id'] ) : 0;
+    $post = $id ? get_post( $id ) : null;
+    if ( ! $post || 'post' !== $post->post_type ) return new WP_Error( 'not_found', 'Post not found.' );
+    if ( ! current_user_can( 'read_post', $id ) ) return new WP_Error( 'forbidden', 'You do not have permission to read object ' . $id . '.' );
+    return array(
+        'id'         => $post->ID,
+        'title'      => $post->post_title,
+        'content'    => $post->post_content,
+        'url'        => get_permalink( $post->ID ),
+        'status'     => $post->post_status,
+        'date'       => get_the_date( 'Y-m-d', $post->ID ),
+        'author'     => get_the_author_meta( 'display_name', $post->post_author ),
+        'categories' => wp_get_post_categories( $post->ID, array( 'fields' => 'names' ) ),
+        'tags'       => wp_get_post_tags( $post->ID, array( 'fields' => 'names' ) ),
+        'excerpt'    => has_excerpt( $post->ID ) ? get_the_excerpt( $post ) : wp_trim_words( $post->post_content, 40 ),
+    );
+}
+
 function wsp_execute_create_post( $input ) {
     $args = array(
         'post_title'   => sanitize_text_field( wp_unslash( $input['title'] ) ),
@@ -40,7 +59,13 @@ function wsp_execute_create_post( $input ) {
 }
 
 function wsp_execute_update_post( $input ) {
-    $args = array( 'ID' => intval( $input['id'] ) );
+    $post = wsp_mcp_guard_edit_post( isset( $input['id'] ) ? $input['id'] : 0, 'post' );
+    if ( is_wp_error( $post ) ) return $post;
+    if ( isset( $input['status'] ) ) {
+        $status_check = wsp_mcp_guard_post_status( $post, $input['status'] );
+        if ( is_wp_error( $status_check ) ) return $status_check;
+    }
+    $args = array( 'ID' => $post->ID );
     if ( isset( $input['title'] ) )      $args['post_title']    = sanitize_text_field( wp_unslash( $input['title'] ) );
     if ( isset( $input['content'] ) )    $args['post_content']  = wp_kses_post( wp_unslash( $input['content'] ) );
     if ( isset( $input['status'] ) )     $args['post_status']   = sanitize_text_field( wp_unslash( $input['status'] ) );
@@ -52,7 +77,9 @@ function wsp_execute_update_post( $input ) {
 }
 
 function wsp_execute_delete_post( $input ) {
-    $id = intval( $input['id'] );
+    $post = wsp_mcp_guard_delete_post( isset( $input['id'] ) ? $input['id'] : 0, 'post' );
+    if ( is_wp_error( $post ) ) return $post;
+    $id = $post->ID;
     return wp_trash_post( $id )
         ? array( 'success' => true,  'message' => "Post {$id} moved to trash." )
         : array( 'success' => false, 'error'   => 'Could not trash post.' );
